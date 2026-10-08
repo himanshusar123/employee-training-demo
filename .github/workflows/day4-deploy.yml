@@ -1,0 +1,68 @@
+name: EY Day 4 CI-CD
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ACR_LOGIN_SERVER: eyday4acr2026hs083.azurecr.io
+  IMAGE_NAME: employee-training-demo
+  RESOURCE_GROUP: tpl-azure-stan-az900-vhn3-sbx
+  AKS_CLUSTER: aks-ey-day4-demo
+
+jobs:
+  build-push-deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Azure login using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login --name eyday4acr2026hs083
+
+      - name: Build Docker image
+        run: |
+          docker build -t $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.run_number }} .
+
+      - name: Push Docker image to ACR
+        run: |
+          docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.run_number }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$AKS_CLUSTER" \
+            --admin \
+            --overwrite-existing
+
+      - name: Deploy image to AKS
+        run: |
+          kubectl set image deployment/employee-app \
+            employee-app=$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.run_number }}
+
+      - name: Wait for rolling update
+        run: |
+          kubectl rollout status deployment/employee-app
+
+      - name: Verify deployment
+        run: |
+          kubectl get deployment employee-app
+          kubectl get pods
